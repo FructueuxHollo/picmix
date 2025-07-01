@@ -1,5 +1,5 @@
-picmix/                   ← Racine du projet (à renommer selon ton package)  
-├── `pyproject.toml`        ← Configuration moderne (PEP 621) ou `setup.py` si tu préfères setuptools  
+picmix/                   ← Racine du projet  
+├── `pyproject.toml`        ← Configuration moderne (PEP 621) ou `setup.py`   
 ├── `README.md`             ← Présentation du package, installation, exemples d’utilisation  
 ├── `LICENSE`               ← Licence (MIT, Apache, etc.)  
 ├── `MANIFEST.in`           ← Fichiers supplémentaires à inclure dans la distribution  
@@ -7,7 +7,7 @@ picmix/                   ← Racine du projet (à renommer selon ton package)
 ├── `src/`                  
 │   └── `picmix/`         ← Code source installable  
 │       ├── `__init__.py`  
-│       ├── `encryption.py` ← Fonctions/classe principale d’encryption basée sur ton équation  
+│       ├── `encryption.py` ← Fonctions/classe principale d’encryption basée sur les équations  
 │       ├── `utils.py`      ← Helpers (lecture/écriture d’images, conversion, validation)  
 │       └── `cli.py`        ← CLI (`argparse`) pour un usage en ligne de commande  
 ├── `tests/`                
