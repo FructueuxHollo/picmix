@@ -30,8 +30,8 @@ def main():
     # Plus time_steps est élevé, plus le "mélange" est fort.
     # Pour un premier test, gardons des valeurs basses pour que ce soit rapide.
     simulation_config = {
-        'time_steps': 1000, # Réduit pour un test rapide
-        'dt': 0.002
+        'time_steps': 20, # Réduit pour un test rapide
+        'dt': 0.1
     }
     
     # Vérifier que l'image de test existe

@@ -1,6 +1,8 @@
 import numpy as np
 import hashlib
 from typing import Tuple, Dict, Any
+from scipy.ndimage import map_coordinates
+from tqdm import tqdm
 
 class PicMixEngine:
     """
@@ -23,7 +25,8 @@ class PicMixEngine:
         self.config = {
             'time_steps': 50,      # Nombre total de pas de temps (équivalent à T/dt)
             'dt': 0.1,             # Taille du pas de temps
-            'default_viscosity': 0.1 # Viscosité par défaut si la clé ne permet pas d'en calculer une
+            'default_viscosity': 0.1, # Viscosité par défaut si la clé ne permet pas d'en calculer une
+            'force_funcs': None
         }
         if config:
             self.config.update(config)
@@ -118,57 +121,66 @@ class PicMixEngine:
         
         # --- 2. Dérivation de la Viscosité (ν) ---
         # On implémente l'Algorithme 1 du papier.
-        digits = []
-        for char in self.key:
-            # On traite chaque chiffre des codes ASCII des caractères de la clé.
-            for digit_char in str(ord(char)):
-                digit = int(digit_char)
-                if digit != 0:
-                    digits.append(digit)
-        
-        if len(set(digits)) > 1:
-            min_val = min(digits)
-            max_val = max(digits)
-            viscosity = min_val / max_val
+        if 'viscosity' in self.config:
+            self.parameters['viscosity'] = self.config['viscosity']
         else:
-            # Cas par défaut si la clé est trop simple (ex: "11111111")
-            viscosity = self.config['default_viscosity']
+            digits = []
+            for char in self.key:
+                # On traite chaque chiffre des codes ASCII des caractères de la clé.
+                for digit_char in str(ord(char)):
+                    digit = int(digit_char)
+                    if digit != 0:
+                        digits.append(digit)
             
-        self.parameters['viscosity'] = viscosity
+            if len(set(digits)) > 1:
+                min_val = min(digits)
+                max_val = max(digits)
+                viscosity = min_val / max_val
+            else:
+                # Cas par défaut si la clé est trop simple (ex: "11111111")
+                viscosity = self.config['default_viscosity']
+                
+            self.parameters['viscosity'] = viscosity
         
         # --- 3. Synthèse des Fonctions Source (f) et de Bord (g) ---
         # On implémente l'Algorithme 2. On génère 4 fonctions : f_x, f_y, g_x, g_y.
-        
-        # Base de fonctions candidates (comme dans l'Algorithme 2)
-        # Chaque fonction prend en entrée (X, Y, params)
-        self.function_templates = [
-            lambda X, Y, p: p[0] * np.sin(p[1] * X + p[2] * Y + p[3]),
-            lambda X, Y, p: p[0] * np.cos(p[1] * X) * np.sin(p[2] * Y + p[3]),
-            lambda X, Y, p: p[0] * np.exp(-((X - p[1])**2 + (Y - p[2])**2) / p[3]**2),
-            lambda X, Y, p: p[0] * X**2 + p[1] * Y**2 + p[2] * X * Y + p[3],
-            lambda X, Y, p: p[0] * np.tanh(p[1] * X + p[2] * Y + p[3])
-        ]
-        
-        def synthesize_function():
-            """Petite fonction d'aide pour synthétiser une fonction aléatoire."""
-            # Choisir un template de fonction au hasard
-            template_idx = self.prng.randint(0, len(self.function_templates))
-            template = self.function_templates[template_idx]
-            
-            # Générer des paramètres aléatoires pour ce template
-            # On génère 4 paramètres dans une plage raisonnable [-2, 2]
-            # Le dernier paramètre pour le Gaussien doit être > 0
-            params = self.prng.uniform(-2, 2, size=4)
-            if template_idx == 2: # Cas du Gaussien, l'écart-type p[3] doit être positif
-                params[3] = self.prng.uniform(0.1, 1.0)
-                
-            # Retourne une fonction "callable" qui a déjà ses paramètres fixés.
-            # C'est une "closure" en programmation.
-            return lambda X, Y: template(X, Y, params)
 
-        # On génère les 4 fonctions dont on a besoin pour le modèle
-        self.parameters['f_x_func'] = synthesize_function()
-        self.parameters['f_y_func'] = synthesize_function()
+        if self.config.get('force_funcs'):
+            print("Using provided forcing functions.")
+            self.parameters['f_x_func'] = self.config['force_funcs']['f_x_func']
+            self.parameters['f_y_func'] = self.config['force_funcs']['f_y_func']
+        else:
+            print("Synthesizing forcing functions.")        
+            # Base de fonctions candidates (comme dans l'Algorithme 2)
+            # Chaque fonction prend en entrée (X, Y, params)
+            self.function_templates = [
+                lambda X, Y, p: p[0] * np.sin(p[1] * X + p[2] * Y + p[3]),
+                lambda X, Y, p: p[0] * np.cos(p[1] * X) * np.sin(p[2] * Y + p[3]),
+                lambda X, Y, p: p[0] * np.exp(-((X - p[1])**2 + (Y - p[2])**2) / p[3]**2),
+                lambda X, Y, p: p[0] * X**2 + p[1] * Y**2 + p[2] * X * Y + p[3],
+                lambda X, Y, p: p[0] * np.tanh(p[1] * X + p[2] * Y + p[3])
+            ]
+            
+            def synthesize_function():
+                """Petite fonction d'aide pour synthétiser une fonction aléatoire."""
+                # Choisir un template de fonction au hasard
+                template_idx = self.prng.randint(0, len(self.function_templates))
+                template = self.function_templates[template_idx]
+                
+                # Générer des paramètres aléatoires pour ce template
+                # On génère 4 paramètres dans une plage raisonnable [-2, 2]
+                # Le dernier paramètre pour le Gaussien doit être > 0
+                params = self.prng.uniform(-2, 2, size=4)
+                if template_idx == 2: # Cas du Gaussien, l'écart-type p[3] doit être positif
+                    params[3] = self.prng.uniform(0.1, 1.0)
+                    
+                # Retourne une fonction "callable" qui a déjà ses paramètres fixés.
+                # C'est une "closure" en programmation.
+                return lambda X, Y: template(X, Y, params)
+
+            # On génère les 4 fonctions dont on a besoin pour le modèle
+            self.parameters['f_x_func'] = synthesize_function()
+            self.parameters['f_y_func'] = synthesize_function()
         # Pour l'instant on ne gère pas les conditions de bord 'g', on les met à zero.
         # C'est une simplification pour commencer.
         self.parameters['g_x_func'] = lambda X, Y: 0.0
@@ -203,10 +215,7 @@ class PicMixEngine:
         
         # Boucle temporelle
         num_steps = self.config['time_steps']
-        for n in range(num_steps):
-            # On utilise tqdm pour avoir une belle barre de progression
-            if n % 10 == 0:
-                print(f"  -> Velocity step {n}/{num_steps}")
+        for n in tqdm(range(num_steps), desc="Velocity Computation"):
 
             # Copie de l'état actuel pour les calculs
             u_prev = self.u.copy()
@@ -217,26 +226,18 @@ class PicMixEngine:
 
             # 1. Diffusion (implicite pour la stabilité)
             # On résout pour la composante vx (u[:,:,0]) et vy (u[:,:,1]) séparément
-            self.u[:,:,0] = self._solve_diffusion(u_prev[:,:,0], u_prev[:,:,0], nu, dt)
-            self.u[:,:,1] = self._solve_diffusion(u_prev[:,:,1], u_prev[:,:,1], nu, dt)
+            vx_diffused = self._solve_diffusion(u_prev[:,:,0], u_prev[:,:,0], nu, dt)
+            vy_diffused = self._solve_diffusion(u_prev[:,:,1], u_prev[:,:,1], nu, dt)
             
-            # 2. Advection (avec un schéma upwind)
-            u_advected_x = self._solve_advection_upwind(self.u[:,:,0], self.u, dt)
-            u_advected_y = self._solve_advection_upwind(self.u[:,:,1], self.u, dt)
-            self.u = np.stack([u_advected_x, u_advected_y], axis=-1)
+            # Advection du champ de vitesse par lui-même
+            u_advected = self._solve_advection(np.stack([vx_diffused, vy_diffused], axis=-1), 
+                                               np.stack([vx_diffused, vy_diffused], axis=-1), dt)
 
-            # 3. Forçage (simple ajout)
-            self.u[:,:,0] += dt * self.f_x
-            self.u[:,:,1] += dt * self.f_y
+            # Ajout du forçage
+            self.u[:,:,0] = u_advected[:,:,0] + dt * self.f_x
+            self.u[:,:,1] = u_advected[:,:,1] + dt * self.f_y
             
-            # 4. (Optionnel mais recommandé) Projection pour enlever la divergence
-            # Le papier mentionne que Burgers n'a pas cette contrainte, mais en pratique
-            # cela peut éviter que le champ "explose". Pour l'instant, on l'omet pour
-            # rester fidèle au papier, mais on garde l'idée en tête.
-
-            # Stockage du résultat dans l'historique
             self.u_history[n + 1] = self.u.copy()
-
         print("Velocity field history computed.")
 
     def _solve_diffusion(self, x: np.ndarray, x0: np.ndarray, k: float, dt: float, iters: int = 20) -> np.ndarray:
@@ -264,88 +265,49 @@ class PicMixEngine:
 
         return x
     
-    def _solve_advection_upwind(self, field: np.ndarray, velocity_field: np.ndarray, dt: float) -> np.ndarray:
+    def _solve_advection(self, field_to_advect: np.ndarray, velocity_field: np.ndarray, dt: float) -> np.ndarray:
         """
-        Advecte un champ en utilisant un schéma upwind du premier ordre.
-        Ceci correspond à l'équation (9) du papier (Encryption).
+        Advecte un champ (scalaire ou vectoriel) en utilisant un schéma semi-lagrangien.
         """
-        vx = velocity_field[:, :, 0]
-        vy = velocity_field[:, :, 1]
-        
-        # Création de copies paddées pour gérer les bords facilement
-        padded_field = np.pad(field, 1, mode='edge')
-        
-        # Différences finies
-        grad_x_pos = (padded_field[1:-1, 1:-1] - padded_field[1:-1, :-2]) / self.dx
-        grad_x_neg = (padded_field[1:-1, 2:] - padded_field[1:-1, 1:-1]) / self.dx
-        
-        grad_y_pos = (padded_field[1:-1, 1:-1] - padded_field[:-2, 1:-1]) / self.dy
-        grad_y_neg = (padded_field[2:, 1:-1] - padded_field[1:-1, 1:-1]) / self.dy
-        
-        # Le coeur du schéma UPWIND
-        # Si la vitesse est positive, on prend la différence "en amont" (backward difference)
-        # Si la vitesse est négative, on prend la différence "en amont" (forward difference)
-        advection_term = (np.maximum(vx, 0) * grad_x_pos + np.minimum(vx, 0) * grad_x_neg +
-                        np.maximum(vy, 0) * grad_y_pos + np.minimum(vy, 0) * grad_y_neg)
-                        
-        # Mise à jour avec Euler explicite
-        return field - dt * advection_term
+        y, x = np.mgrid[0:self.height, 0:self.width].astype(np.float64)
+        vx = velocity_field[:,:,0]
+        vy = velocity_field[:,:,1]
 
-
-    def _solve_advection_downwind(self, field: np.ndarray, velocity_field: np.ndarray, dt: float) -> np.ndarray:
-        """
-        Advecte un champ en utilisant un schéma downwind du premier ordre.
-        Ceci correspond à l'équation (10) du papier (Decryption).
-        """
-        vx = velocity_field[:, :, 0]
-        vy = velocity_field[:, :, 1]
-
-        # Création de copies paddées
-        padded_field = np.pad(field, 1, mode='edge')
+        x_prev = x - vx * dt * (self.width - 1)
+        y_prev = y - vy * dt * (self.height - 1)
         
-        # Différences finies
-        # Noter que les gradients sont inversés par rapport à upwind
-        grad_x_pos = (padded_field[1:-1, 2:] - padded_field[1:-1, 1:-1]) / self.dx # Forward
-        grad_x_neg = (padded_field[1:-1, 1:-1] - padded_field[1:-1, :-2]) / self.dx # Backward
+        # Pas besoin de clip ici, map_coordinates le gère avec 'mode'
         
-        grad_y_pos = (padded_field[2:, 1:-1] - padded_field[1:-1, 1:-1]) / self.dy # Forward
-        grad_y_neg = (padded_field[1:-1, 1:-1] - padded_field[:-2, 1:-1]) / self.dy # Backward
+        coords = np.array([y_prev, x_prev])
+        
+        if field_to_advect.ndim == 3:
+            advected_field = np.zeros_like(field_to_advect)
+            for i in range(field_to_advect.shape[2]):
+                advected_field[:,:,i] = map_coordinates(field_to_advect[:,:,i], coords, order=1, mode='reflect')
+        else:
+            advected_field = map_coordinates(field_to_advect, coords, order=1, mode='reflect')
 
-        # Le coeur du schéma DOWNWIND
-        # Si la vitesse est positive, on prend la différence "en aval" (forward difference)
-        # Si la vitesse est négative, on prend la différence "en aval" (backward difference)
-        advection_term = (np.maximum(vx, 0) * grad_x_pos + np.minimum(vx, 0) * grad_x_neg +
-                        np.maximum(vy, 0) * grad_y_pos + np.minimum(vy, 0) * grad_y_neg)
-                        
-        # Mise à jour avec Euler explicite. Notez le PLUS ici.
-        return field + dt * advection_term
+        return advected_field
     
-    def _advect_pixels(self, forward: bool = True) -> np.ndarray:
+    def _advect_pixels(self, initial_rho: np.ndarray, forward: bool = True) -> np.ndarray:
         """
         Advecte le champ de densité en utilisant les schémas appropriés.
         """
         num_steps = self.config['time_steps']
         dt = self.config['dt']
-        rho_current = self.rho.copy()
+        rho_current = initial_rho.copy()
         
         if forward:
             print("Advecting pixels FORWARD (Encryption) using UPWIND scheme...")
             time_indices = range(num_steps)
-            for n in time_indices:
-                if n % 10 == 0: print(f"  -> Pixel advection step {n}/{num_steps}")
+            for n in tqdm(time_indices, desc="Forward Advection"):
                 velocity_field = self.u_history[n + 1]
-                temp = self._solve_advection_upwind(rho_current, velocity_field, dt)
-                rho_current = np.clip(temp, 0.0, 1.0)  # Assurer que les valeurs restent entre 0 et 1
-                # rho_current = self._solve_advection_upwind(rho_current, velocity_field, dt)
+                rho_current = self._solve_advection(rho_current, velocity_field, dt)
         else:
             print("Advecting pixels BACKWARD (Decryption) using DOWNWIND scheme...")
             time_indices = range(num_steps - 1, -1, -1)
-            for n in time_indices:
-                if n % 10 == (num_steps - 1) % 10 or n % 10 == 0:
-                    print(f"  -> Pixel advection step {n}/{num_steps}")
+            for n in tqdm(time_indices, desc="Backward Advection"):
                 velocity_field = self.u_history[n + 1]
-                temp = self._solve_advection_downwind(rho_current, velocity_field, dt)
-                rho_current = np.clip(temp, 0.0, 1.0)  # Assurer que les valeurs restent entre 0 et 1
-                # rho_current = self._solve_advection_downwind(rho_current, velocity_field, dt)
+                rho_current = self._solve_advection(rho_current, velocity_field, -dt)
                 
         return rho_current
