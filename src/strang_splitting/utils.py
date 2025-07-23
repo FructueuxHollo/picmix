@@ -284,7 +284,7 @@ def plot_strang_splitting_results(u, v, u_new, v_new, img_shape, Lx, Ly):
     data = [u, v, u_new, v_new]
 
     for ax, title, d in zip(axes.flat, titles, data):
-        im = ax.imshow(d.reshape(img_shape), cmap="inferno", origin="lower", extent=[0, Lx, 0, Ly])
+        im = ax.imshow(d.reshape(img_shape), cmap="gray", origin="lower", extent=[0, Lx, 0, Ly])
         ax.set_title(title)
         plt.colorbar(im, ax=ax)
     plt.tight_layout()

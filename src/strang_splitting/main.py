@@ -27,7 +27,7 @@ dx, dy = Lx / Nx, Ly / Ny
 
 # Paramètres Gray-Scott
 ru, rv = 0.16, 0.08
-f, k = 0.060, 0.062
+f, k = 0.060, 0.12
 
 # dt = np.min([dx**2 /ru, dy**2 / rv, 1]) / 4   # Pas de temps pour la simulation
 # dt = dx**2 / (4 * np.max([ru, rv]))   # Pas de temps pour la simulation
@@ -114,7 +114,8 @@ u_final, v_final = simulate_strang_splitting(u, v, ru, rv, f, k, L, dt, T)
 # ------------------------
 # Affichage
 # ------------------------
-
+coef = 1.8
+u_final +=  coef * v_final
 plot_strang_splitting_results(u, v, u_final, v_final, img_u.shape, Lx, Ly)
 
 # # Sauvegarder les résultats finaux
@@ -127,10 +128,10 @@ plot_strang_splitting_results(u, v, u_final, v_final, img_u.shape, Lx, Ly)
 # Exécuter la simulation à l'envers sur toute la durée T
 print("Démarrage de la simulation backward (2 fois) ...")
 # Exécuter la simulation à l'envers sur toute la durée T
-# for _ in range(N+1):
+# for _ in range(N+5):
 #     u_backward, v_backward = simulate_backward_strang_splitting(u_final, v_final, ru, rv, f, k, L, dt, T)
-    # Pour tester la stabilité
-u_backward, v_backward = simulate_backward_strang_splitting(u_final, v_final, ru, rv, f, k, L, dt, T)
+#     # Pour tester la stabilité
+u_backward, v_backward = simulate_backward_strang_splitting(u_final - coef * v_final, v_final, ru, rv, f, k, L, dt, T)
 
 # Afficher les résultats de la simulation à l'envers
 plot_strang_splitting_results(u_final, v_final, u_backward, v_backward, img_u.shape, Lx, Ly)
