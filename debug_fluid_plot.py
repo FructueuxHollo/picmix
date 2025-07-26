@@ -1,9 +1,12 @@
 # Fichier: debug_fluid.py (version améliorée pour l'analyse)
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
+
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
-import os
 import time
 
 # On importe directement le moteur depuis le package

@@ -1,9 +1,12 @@
 # run_test.py
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
+
 import picmix
 import numpy as np
 from PIL import Image
-import os
 
 def compare_images(path1, path2):
     """Compare deux images et retourne leur Mean Squared Error (MSE)."""

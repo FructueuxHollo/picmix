@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
+
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -33,10 +37,10 @@ def main():
     # C'est ici que nous allons pouvoir expérimenter.
     # Pour commencer, utilisons des valeurs simples.
     simulation_config = {
-        'time_steps': 20,       # Moins d'étapes = moins de diffusion accumulée
+        'time_steps': 200,       # Moins d'étapes = moins de diffusion accumulée
         'dt': 0.05,
         # On impose une viscosité fixe, sans la dériver de la clé.
-        'viscosity': 0.0001, 
+        'viscosity': 0.00001, 
         # On impose des fonctions de forçage simples pour commencer (sinus/cosinus)
         'force_funcs': {
             'f_x_func': lambda X, Y: 0.1 * np.sin(2 * np.pi * Y),
@@ -58,10 +62,12 @@ def main():
     
     # Exécuter uniquement la partie "fluide" du chiffrement
     engine_encrypt._compute_velocity_history()
+    
     fluid_encrypted_array = engine_encrypt._advect_pixels(engine_encrypt.rho, forward=True)
     
     # Sauvegarder l'image chiffrée par le fluide
     Image.fromarray((np.clip(fluid_encrypted_array, 0, 1) * 255).astype(np.uint8)).save(IMAGE_FLUIDE_CHIFFREE)
+    
     print(f"Image chiffrée par le fluide sauvegardée dans '{IMAGE_FLUIDE_CHIFFREE}'")
 
     # --- Déchiffrement avec la simulation fluide seule ---
