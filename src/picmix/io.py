@@ -1,53 +1,51 @@
 import numpy as np
 from PIL import Image
+import os
 
 def load_image_as_array(image_path: str) -> np.ndarray:
-    """
-    Charge une image à partir d'un chemin de fichier, la convertit en niveaux de gris
-    et la retourne sous forme de tableau NumPy normalisé (valeurs entre 0.0 et 1.0).
-
-    Args:
-        image_path (str): Le chemin vers le fichier image.
-
-    Returns:
-        np.ndarray: Le tableau NumPy représentant l'image en niveaux de gris.
-    """
+    """Loads an image, converts to grayscale, and normalizes to [0.0, 1.0]."""
     try:
-        img = Image.open(image_path)
-        # Convertir en niveaux de gris ('L' pour Luminance)
-        img_gray = img.convert('L')
-        # Convertir en tableau NumPy et normaliser
-        img_array = np.array(img_gray, dtype=np.float64) / 255.0
-        return img_array
+        with Image.open(image_path) as img:
+            img_gray = img.convert('L')
+            return np.array(img_gray, dtype=np.float64) / 255.0
     except FileNotFoundError:
-        print(f"Erreur: Le fichier '{image_path}' n'a pas été trouvé.")
-        raise
+        raise FileNotFoundError(f"Error: Input file '{image_path}' not found.")
     except Exception as e:
-        print(f"Erreur lors du chargement de l'image: {e}")
-        raise
+        raise IOError(f"Error loading image: {e}")
 
 def save_array_as_image(image_array: np.ndarray, output_path: str):
-    """
-    Sauvegarde un tableau NumPy en tant que fichier image.
-    Le tableau est dé-normalisé (multiplié par 255) et converti en entiers 8 bits.
-
-    Args:
-        image_array (np.ndarray): Le tableau à sauvegarder.
-        output_path (str): Le chemin où sauvegarder l'image.
-    """
+    """Saves a NumPy array as a grayscale image, clipping values to [0, 1]."""
     try:
-        # S'assurer que les valeurs sont bien entre 0 et 1 avant de convertir
-        image_array = np.clip(image_array, 0.0, 1.0)
-        
-        # Dé-normaliser et convertir en entiers 8-bits non signés
-        img_data = (image_array * 255).astype(np.uint8)
-        
-        # Créer une image PIL à partir du tableau
-        img = Image.fromarray(img_data, 'L')
-        
-        # Sauvegarder l'image
-        img.save(output_path)
-        print(f"Image sauvegardée avec succès à l'emplacement : '{output_path}'")
+        # Clip values to the valid range [0, 1] before scaling
+        clipped_array = np.clip(image_array, 0.0, 1.0)
+        img_data = (clipped_array * 255).astype(np.uint8)
+        Image.fromarray(img_data, 'L').save(output_path)
+        print(f"Image successfully saved to '{output_path}'")
     except Exception as e:
-        print(f"Erreur lors de la sauvegarde de l'image: {e}")
-        raise
+        raise IOError(f"Error saving image: {e}")
+
+def save_state_to_npz(output_path: str, u: np.ndarray, v: np.ndarray, shape: tuple):
+    """Saves the encrypted u and v states and original shape to a compressed .npz file."""
+    try:
+        if not output_path.endswith('.npz'):
+            output_path += '.npz'
+        np.savez_compressed(output_path, u=u, v=v, shape=shape)
+        print(f"Encrypted state saved to '{output_path}'")
+    except Exception as e:
+        raise IOError(f"Error saving .npz data: {e}")
+
+def load_state_from_npz(input_path: str) -> tuple:
+    """Loads the u, v, and shape states from an .npz file."""
+    try:
+        if not input_path.endswith('.npz'):
+            input_path += '.npz'
+        with np.load(input_path) as data:
+            u = data['u']
+            v = data['v']
+            shape = data['shape']
+        print(f"Encrypted state loaded from '{input_path}'")
+        return u, v, tuple(shape)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Encrypted data file not found: '{input_path}'")
+    except Exception as e:
+        raise IOError(f"Error loading .npz data: {e}")
