@@ -1,4 +1,4 @@
-import picmix
+import vortexcrypt
 import os
 
 SECRET_PASSPHRASE = "mon_secret_passphrase"
@@ -15,7 +15,7 @@ config_file = "config.json"
 
 # --- 1. Chiffrement ---
 print(f"Chiffrement de '{original_image_path}'...")
-picmix.encrypt(
+vortexcrypt.encrypt(
     image_path=original_image_path,
     key=SECRET_PASSPHRASE,
     output_path_npz=encrypted_data_path,
@@ -25,7 +25,7 @@ print("\n" + "="*50 + "\n")
 
 # --- 2. Déchiffrement ---
 print(f"Déchiffrement de '{encrypted_data_path}'...")
-picmix.decrypt(
+vortexcrypt.decrypt(
     encrypted_state_path_npz=encrypted_data_path,
     key=SECRET_PASSPHRASE,
     output_path_png=decrypted_image_path,
