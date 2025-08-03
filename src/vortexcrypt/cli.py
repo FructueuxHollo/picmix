@@ -1,5 +1,3 @@
-# Fichier: src/picmix/cli.py
-
 import typer
 import os
 from PIL import Image
@@ -10,14 +8,14 @@ from . import decrypt as decrypt_api
 from . import __version__
 
 app = typer.Typer(
-    name="picmix",
+    name="vortexcrypt",
     help="🖼️ A novel image encryption tool using reaction-diffusion systems (VortexCrypt)."
 )
 
 def version_callback(value: bool):
     """Callback to display the version"""
     if value:
-        print(f"PicMix CLI Version: {__version__}")
+        print(f"VortexCrypt CLI Version: {__version__}")
         raise typer.Exit()
 
 @app.command()
