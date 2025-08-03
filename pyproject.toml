@@ -2,7 +2,7 @@
 name = "vortexcrypt"
 version = "1.0.0"
 description = "A novel image encryption package based on time-reversible reaction-diffusion systems."
-authors = ["FructueuxHollo <fructueuxhollo@gmail.com>"]
+authors = ["FructueuxHollo <fructueuxhollo@gmail.com>", "CharbelMamalankou <charbelzeusmamlankou@gmail.com>", "JudeAgbodoyetin", "OziasDeguenon", "MarcelinOgoungbe"]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "vortexcrypt", from = "src"}]
