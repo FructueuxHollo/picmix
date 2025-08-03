@@ -10,6 +10,8 @@ original_image_path = "test_image.png"
 encrypted_data_path = os.path.join(output_dir, "encrypted_data.npz")
 # Ajout d'un chemin pour la preview
 decrypted_image_path = os.path.join(output_dir, "decrypted_final.png")
+# Chemin vers le fichier de configuration, si nécessaire
+config_file = "config.json"  
 
 # --- 1. Chiffrement ---
 print(f"Chiffrement de '{original_image_path}'...")
@@ -17,6 +19,7 @@ picmix.encrypt(
     image_path=original_image_path,
     key=SECRET_PASSPHRASE,
     output_path_npz=encrypted_data_path,
+    config_path=config_file,  
 )
 print("\n" + "="*50 + "\n")
 
@@ -25,7 +28,8 @@ print(f"Déchiffrement de '{encrypted_data_path}'...")
 picmix.decrypt(
     encrypted_state_path_npz=encrypted_data_path,
     key=SECRET_PASSPHRASE,
-    output_path_png=decrypted_image_path
+    output_path_png=decrypted_image_path,
+    config_path=config_file  
 )
 
 print(f"\nProcessus terminé. L'image déchiffrée est : '{decrypted_image_path}'")

@@ -2,18 +2,18 @@ __version__ = "1.0.0"
 
 import numpy as np
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Import the core engine and IO functions
 from .engine import VortexCryptEngine
 from .io import (load_image_as_array, save_array_as_image, 
-               save_state_to_npz, load_state_from_npz)
+               save_state_to_npz, load_state_from_npz, load_config_from_json)
 
 def encrypt(
     image_path: str,
     output_path_npz: str,
     key: str,
-    config: Dict[str, Any] = None,
+    config_path: Optional[str] = None,
     save_preview: bool = True
 ):
     """
@@ -30,6 +30,8 @@ def encrypt(
         save_preview (bool): If True, saves a .png preview of the encrypted image.
     """
     print("--- VortexCrypt Encryption ---")
+    config = load_config_from_json(config_path) if config_path else None
+
     original_array = load_image_as_array(image_path, grayscale=False)
     
     engine = VortexCryptEngine(key=key, image_shape=original_array.shape, config=config)
@@ -45,7 +47,6 @@ def encrypt(
     
     if save_preview:
         if engine.is_color:
-            num_pixels_padded = engine.padded_shape[0] * engine.padded_shape[1]
             u_final_red_channel_flat = u_final_flat.reshape(-1, 3)[:, 0]
             u_preview = u_final_red_channel_flat.reshape(engine.padded_shape)
         else:
@@ -61,7 +62,7 @@ def decrypt(
     encrypted_state_path_npz: str,
     output_path_png: str,
     key: str,
-    config: Dict[str, Any] = None
+    config_path: Optional[str] = None
 ):
     """
     Decrypts an image from a .npz state file using the VortexCrypt algorithm.
@@ -73,6 +74,8 @@ def decrypt(
         config (Dict, optional): The SAME config dictionary, if used for encryption.
     """
     print("--- VortexCrypt Decryption ---")
+    config = load_config_from_json(config_path) if config_path else None
+
     u_final_flat, v_final_flat, padded_shape = load_state_from_npz(encrypted_state_path_npz)
     
     pad = config.get('pad_width', 1) if config else 1
