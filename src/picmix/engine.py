@@ -1,313 +1,301 @@
 import numpy as np
 import hashlib
-from typing import Tuple, Dict, Any
-from scipy.ndimage import map_coordinates
+from typing import Dict, Any, Tuple
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
+from scipy.optimize import root
 from tqdm import tqdm
+from numba import jit
 
-class PicMixEngine:
+@jit(nopython=True, fastmath=True)
+def _newton_raphson_step_2x2(u0, v0, u1, v1, f, k, tau):
+    """Effectue une seule itération de Newton-Raphson pour le système 2x2."""
+    # Évaluation au point milieu
+    u_bar, v_bar = 0.5 * (u0 + u1), 0.5 * (v0 + v1)
+    
+    # Calcul des résidus (valeur de la fonction F)
+    uv2 = u_bar * v_bar**2
+    res_u = u1 - u0 - tau * (-uv2 + f * (1 - u_bar))
+    res_v = v1 - v0 - tau * (uv2 - (f + k) * v_bar)
+    
+    # Calcul du Jacobien
+    
+    j11 = 1.0 + 0.5 * tau * (-v_bar**2 + f)
+    j12 = tau * u_bar * v_bar
+    j21 = -0.5 * tau * v_bar**2
+    j22 = 1.0 - 0.5 * tau * (2 * u_bar * v_bar - (f + k))
+    
+    # Inversion de la matrice Jacobienne 2x2
+    det = j11 * j22 - j12 * j21
+    safe_mask = np.abs(det)> 1e-12
+
+    # Initialiser les mises à jour à zéro
+    delta_u = np.zeros_like(u0)
+    delta_v = np.zeros_like(v0)
+
+    # Appliquer le masque 1D. Numba supporte cela.
+    safe_det = det[safe_mask]
+    safe_j11, safe_j12 = j11[safe_mask], j12[safe_mask]
+    safe_j21, safe_j22 = j21[safe_mask], j22[safe_mask]
+    safe_res_u, safe_res_v = res_u[safe_mask], res_v[safe_mask]
+    
+    inv_det = 1.0 / safe_det
+    
+    # Calcul du pas de Newton uniquement sur les éléments sûrs
+    safe_delta_u = -( (safe_j22 * inv_det) * safe_res_u + (-safe_j12 * inv_det) * safe_res_v )
+    safe_delta_v = -( (-safe_j21 * inv_det) * safe_res_u + (safe_j11 * inv_det) * safe_res_v )
+    
+    # Placer les deltas calculés dans les tableaux de mise à jour complets
+    delta_u[safe_mask] = safe_delta_u
+    delta_v[safe_mask] = safe_delta_v
+    
+    # Mise à jour de la solution
+    u1_new = u1 + delta_u
+    v1_new = v1 + delta_v
+    
+    return u1_new, v1_new
+
+@jit(nopython=True, fastmath=True)
+def _reaction_solver_numba(u_flat, v_flat, f, k, tau, max_iter=5, tol=1e-6):
     """
-    Classe principale pour gérer la simulation de chiffrement/déchiffrement d'images
-    basée sur les équations de la dynamique des fluides (modèle de Burgers).
+    Solveur de Newton-Raphson vectorisé pour tableaux 1D.
     """
-    def __init__(self, image: np.ndarray, key: str, config: Dict[str, Any] = None):
+    u0 = u_flat
+    v0 = v_flat
+    
+    # L'estimation initiale est simplement l'état précédent
+    u1 = u0.copy()
+    v1 = v0.copy()
+
+    for _ in range(max_iter):
+        u1_old, v1_old = u1.copy(), v1.copy()
+        
+        # L'itération de Newton est appliquée à tous les pixels en même temps
+        u1, v1 = _newton_raphson_step_2x2(u0, v0, u1, v1, f, k, tau)
+        
+        # Vérification de la convergence
+        error_u = np.abs(u1 - u1_old)
+        error_v = np.abs(v1 - v1_old)
+        if np.max(error_u) < tol and np.max(error_v) < tol:
+            break
+            
+    return u1, v1
+
+class VortexCryptEngine:
+    """
+    Core engine for encryption/decryption based on the Gray-Scott
+    reaction-diffusion model and a time-reversible Strang-splitting integrator.
+    """
+    # Parameter ranges known to produce complex patterns ("mitosis")
+    F_RATE_RANGE: Tuple[float, float] = (0.01, 0.1)
+    K_RATE_RANGE: Tuple[float, float] = (0.045, 0.07)
+    RU_RATE_RANGE: Tuple[float, float] = (0.1, 0.2)
+    TIME_RANGE: Tuple[float, float] = (20.0, 100.0) # Total simulation time
+
+    def __init__(self, key: str, image_shape: Tuple, config: Dict[str, Any] = None):
         """
-        Initialise le moteur de simulation.
+        Initializes the simulation engine.
 
         Args:
-            image (np.ndarray): L'image sous forme de tableau NumPy (normalisée entre 0 et 1).
-            key (str): La clé secrète fournie par l'utilisateur.
-            config (Dict, optional): Dictionnaire pour surcharger les paramètres par défaut.
+            key (str): The secret key (8-24 characters).
+            image_shape (Tuple[int, int]): The (height, width) of the original image.
+            config (Dict, str, Any], optional): Dictionary to override default parameters.
         """
-        print("Initializing PicMix Engine...")
+        if not (8 <= len(key) <= 24):
+            raise ValueError("Key must be between 8 and 24 characters long.")
+
+        self.key = key
+        self.original_shape = image_shape
+        self.is_color = len(image_shape) == 3
         
-        # --- 1. Configuration par défaut ---
-        # Ces valeurs peuvent être ajustées pour modifier le comportement du chiffrement.
+        # --- 1. Configuration ---
         self.config = {
-            'time_steps': 50,      # Nombre total de pas de temps (équivalent à T/dt)
-            'dt': 0.1,             # Taille du pas de temps
-            'default_viscosity': 0.1, # Viscosité par défaut si la clé ne permet pas d'en calculer une
-            'force_funcs': None
+            'dt': 0.2,
+            'pad_width': 1
         }
         if config:
             self.config.update(config)
-
-        # --- 2. Discrétisation Spatiale ---
-        # L'image d'entrée définit notre domaine spatial.
-        # ρ (rho) représente la densité du "colorant", c'est-à-dire l'intensité des pixels.
-        self.rho = image.astype(np.float64)
-        self.height, self.width = self.rho.shape
-        print(f"Domain size: {self.width}x{self.height}")
-
-        # Grille de coordonnées (utile pour les fonctions f et g)
-        x = np.linspace(0, 1, self.width)
-        y = np.linspace(0, 1, self.height)
-        self.X, self.Y = np.meshgrid(x, y)
-        
-        # Pas spatiaux (h dans les équations)
-        self.dx = 1.0 / (self.width - 1)
-        self.dy = 1.0 / (self.height - 1)
-
-        # --- 3. Initialisation des champs ---
-        # u est le champ de vitesse [vx, vy]. On le stocke comme un tableau 3D.
-        # Le premier canal (0) est vx, le second (1) est vy.
-        self.u = np.zeros((self.height, self.width, 2), dtype=np.float64)
-        
-        # Historique complet du champ de vitesse. C'est crucial pour le déchiffrement.
-        # On stocke u(t) pour chaque pas de temps.
-        self.u_history = np.zeros((self.config['time_steps'] + 1, self.height, self.width, 2), dtype=np.float64)
-
-        # Le papier mentionne les paramètres ν, T, f, g. Ils seront générés
-        # à l'étape suivante à partir de la clé.
-        self.key = key
-        self.parameters = {} # Sera rempli par _derive_parameters_from_key
-
-        # Appel de la méthode de génération
-        self._derive_parameters_from_key()
-
-        print("Engine initialized.")
-
-
-    def run_encryption(self) -> np.ndarray:
-        """Exécute le processus de chiffrement complet."""
-        print("--- Starting Encryption Process ---")
-        
-        # 1. (Déjà fait dans __init__) Générer les paramètres à partir de la clé
-        
-        # 2. Calculer l'historique du champ de vitesse u(t)
-        self._compute_velocity_history()
-        
-        # 3. Advecter l'image rho(t) vers l'avant dans le temps.
-        encrypted_rho = self._advect_pixels(forward=True)
-
-        print("--- Encryption Process Finished ---")
-        return encrypted_rho
-
-    def run_decryption(self) -> np.ndarray:
-        """Exécute le processus de déchiffrement complet."""
-        print("--- Starting Decryption Process ---")
-
-        # 1. (Déjà fait dans __init__) Générer les mêmes paramètres à partir de la clé
-        
-        # 2. Re-calculer le même historique du champ de vitesse u(t)
-        self._compute_velocity_history()
-
-        # 3. Advecter l'image rho(t) vers l'arrière dans le temps.
-        decrypted_rho = self._advect_pixels(forward=False)
-        
-        print("--- Decryption Process Finished ---")
-        return decrypted_rho
-    
-    def _derive_parameters_from_key(self):
-        """
-        Génère tous les paramètres de simulation de manière déterministe à partir de la clé secrète.
-        Ceci implémente la logique de la section 4.1 du papier.
-        """
-        print(f"Deriving parameters from key: '{self.key}'")
-        
-        # --- 1. Génération de la graine (Seed) via SHA-256 ---
-        # On transforme la clé string en un entier de haute entropie.
-        hash_object = hashlib.sha256(self.key.encode())
-        hash_digest = hash_object.digest() # On obtient un hash de 32 octets
-
-        # La classe np.random.RandomState attend une graine de 32 bits (4 octets).
-        # On prend les 4 premiers octets du hachage pour créer notre graine.
-        seed_bytes = hash_digest[:4]
-        seed = int.from_bytes(seed_bytes, 'big')
-        
-        # On initialise le générateur de nombres pseudo-aléatoires (PRNG) de NumPy
-        # avec cette graine. Cela garantit que toutes les opérations "aléatoires"
-        # qui suivent seront identiques pour la même clé.
-        self.prng = np.random.RandomState(seed)
-        
-        # --- 2. Dérivation de la Viscosité (ν) ---
-        # On implémente l'Algorithme 1 du papier.
-        if 'viscosity' in self.config:
-            self.parameters['viscosity'] = self.config['viscosity']
-        else:
-            digits = []
-            for char in self.key:
-                # On traite chaque chiffre des codes ASCII des caractères de la clé.
-                for digit_char in str(ord(char)):
-                    digit = int(digit_char)
-                    if digit != 0:
-                        digits.append(digit)
             
-            if len(set(digits)) > 1:
-                min_val = min(digits)
-                max_val = max(digits)
-                viscosity = min_val / max_val
-            else:
-                # Cas par défaut si la clé est trop simple (ex: "11111111")
-                viscosity = self.config['default_viscosity']
-                
-            self.parameters['viscosity'] = viscosity
+        self.padded_shape = (
+            self.original_shape[0] + 2 * self.config['pad_width'],
+            self.original_shape[1] + 2 * self.config['pad_width']
+        )
+        self.Nx, self.Ny = self.padded_shape
         
-        # --- 3. Synthèse des Fonctions Source (f) et de Bord (g) ---
-        # On implémente l'Algorithme 2. On génère 4 fonctions : f_x, f_y, g_x, g_y.
+        # --- 2. Parameter & Field Initialization ---
+        self.params: Dict[str, Any] = {}
+        self._derive_parameters()
 
-        if self.config.get('force_funcs'):
-            print("Using provided forcing functions.")
-            self.parameters['f_x_func'] = self.config['force_funcs']['f_x_func']
-            self.parameters['f_y_func'] = self.config['force_funcs']['f_y_func']
-        else:
-            print("Synthesizing forcing functions.")        
-            # Base de fonctions candidates (comme dans l'Algorithme 2)
-            # Chaque fonction prend en entrée (X, Y, params)
-            self.function_templates = [
-                lambda X, Y, p: p[0] * np.sin(p[1] * X + p[2] * Y + p[3]),
-                lambda X, Y, p: p[0] * np.cos(p[1] * X) * np.sin(p[2] * Y + p[3]),
-                lambda X, Y, p: p[0] * np.exp(-((X - p[1])**2 + (Y - p[2])**2) / p[3]**2),
-                lambda X, Y, p: p[0] * X**2 + p[1] * Y**2 + p[2] * X * Y + p[3],
-                lambda X, Y, p: p[0] * np.tanh(p[1] * X + p[2] * Y + p[3])
-            ]
-            
-            def synthesize_function():
-                """Petite fonction d'aide pour synthétiser une fonction aléatoire."""
-                # Choisir un template de fonction au hasard
-                template_idx = self.prng.randint(0, len(self.function_templates))
-                template = self.function_templates[template_idx]
-                
-                # Générer des paramètres aléatoires pour ce template
-                # On génère 4 paramètres dans une plage raisonnable [-2, 2]
-                # Le dernier paramètre pour le Gaussien doit être > 0
-                params = self.prng.uniform(-2, 2, size=4)
-                if template_idx == 2: # Cas du Gaussien, l'écart-type p[3] doit être positif
-                    params[3] = self.prng.uniform(0.1, 1.0)
-                    
-                # Retourne une fonction "callable" qui a déjà ses paramètres fixés.
-                # C'est une "closure" en programmation.
-                return lambda X, Y: template(X, Y, params)
-
-            # On génère les 4 fonctions dont on a besoin pour le modèle
-            self.parameters['f_x_func'] = synthesize_function()
-            self.parameters['f_y_func'] = synthesize_function()
-        # Pour l'instant on ne gère pas les conditions de bord 'g', on les met à zero.
-        # C'est une simplification pour commencer.
-        self.parameters['g_x_func'] = lambda X, Y: 0.0
-        self.parameters['g_y_func'] = lambda X, Y: 0.0
-
-        # On évalue ces fonctions une seule fois sur notre grille pour obtenir les tableaux de forçage
-        self.f_x = self.parameters['f_x_func'](self.X, self.Y)
-        self.f_y = self.parameters['f_y_func'](self.X, self.Y)
+        self.v0 = self._synthesize_initial_catalyst()
+        self.L_op = self._laplacian_matrix()
         
-        # On met T (temps final) directement dans les paramètres
-        self.parameters['T'] = self.config['time_steps'] * self.config['dt']
-        
-        print("Derived parameters:")
-        print(f"  - Viscosity (ν): {self.parameters['viscosity']:.4f}")
-        print(f"  - Final time (T): {self.parameters['T']:.2f}")
-        print("  - Forcing and boundary functions generated.")
+        print(f"VortexCrypt Engine initialized for {'COLOR' if self.is_color else 'GRAYSCALE'} image.")
 
-    def _compute_velocity_history(self):
+    def encrypt(self, image_array: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Calcule l'historique complet du champ de vitesse u(x, y, t) en résolvant
-        l'équation de Burgers vectorielle. Le résultat est stocké dans self.u_history.
-        """
-        print("Computing velocity field history...")
-        
-        # Récupération des paramètres pour plus de lisibilité
-        nu = self.parameters['viscosity']
-        dt = self.config['dt']
-        
-        # Initialisation du champ de vitesse à t=0 (on suppose qu'il est nul au départ)
-        self.u.fill(0)
-        self.u_history[0] = self.u.copy()
-        
-        # Boucle temporelle
-        num_steps = self.config['time_steps']
-        for n in tqdm(range(num_steps), desc="Velocity Computation"):
+        Runs the forward encryption process.
 
-            # Copie de l'état actuel pour les calculs
-            u_prev = self.u.copy()
-
-            # --- Operator Splitting ---
-            # Note : L'ordre peut varier, mais nous allons suivre une séquence logique.
-            # Idéalement, on utiliserait des schémas plus complexes, mais pour commencer :
-
-            # 1. Diffusion (implicite pour la stabilité)
-            # On résout pour la composante vx (u[:,:,0]) et vy (u[:,:,1]) séparément
-            vx_diffused = self._solve_diffusion(u_prev[:,:,0], u_prev[:,:,0], nu, dt)
-            vy_diffused = self._solve_diffusion(u_prev[:,:,1], u_prev[:,:,1], nu, dt)
-            
-            # Advection du champ de vitesse par lui-même
-            u_advected = self._solve_advection(np.stack([vx_diffused, vy_diffused], axis=-1), 
-                                               np.stack([vx_diffused, vy_diffused], axis=-1), dt)
-
-            # Ajout du forçage
-            self.u[:,:,0] = u_advected[:,:,0] + dt * self.f_x
-            self.u[:,:,1] = u_advected[:,:,1] + dt * self.f_y
-            
-            self.u_history[n + 1] = self.u.copy()
-        print("Velocity field history computed.")
-
-    def _solve_diffusion(self, x: np.ndarray, x0: np.ndarray, k: float, dt: float, iters: int = 20) -> np.ndarray:
-        """
-        Résout l'équation de diffusion implicitement en utilisant un solveur de Gauss-Seidel.
-        
         Args:
-            x (np.ndarray): Le champ à diffuser (sera modifié en place et retourné).
-            x0 (np.ndarray): L'état initial du champ avant diffusion.
-            k (float): Coefficient de diffusion (ici, la viscosité ν).
-            dt (float): Pas de temps.
-            iters (int): Nombre d'itérations pour le solveur.
+            image_array (np.ndarray): The original normalized image array.
 
         Returns:
-            np.ndarray: Le champ après diffusion.
+            Tuple[np.ndarray, np.ndarray]: The final flattened states u(T) and v(T).
         """
-        a = dt * k * (self.width - 1) * (self.height - 1) # Normalisation des pas dx, dy
-        
-        for _ in range(iters):
-            # Mise à jour des points intérieurs
-            x[1:-1, 1:-1] = (x0[1:-1, 1:-1] + a * (x[2:, 1:-1] + x[:-2, 1:-1] + 
-                                                x[1:-1, 2:] + x[1:-1, :-2])) / (1 + 4 * a)
-            # On ne gère pas les bords pour l'instant (condition de Neumann implicite = 0 flux)
-            # On pourrait ajouter une fonction set_bnd() plus tard si nécessaire.
+        print("\n--- Running Encryption Pass ---")
+        pad_width = ((self.config['pad_width'], self.config['pad_width']),
+                     (self.config['pad_width'], self.config['pad_width']),
+                     (0, 0)) if self.is_color else self.config['pad_width']
+        u0_padded = np.pad(
+            image_array.astype(np.float64),
+            pad_width=pad_width,
+            mode='reflect'
+        )
 
-        return x
-    
-    def _solve_advection(self, field_to_advect: np.ndarray, velocity_field: np.ndarray, dt: float) -> np.ndarray:
-        """
-        Advecte un champ (scalaire ou vectoriel) en utilisant un schéma semi-lagrangien.
-        """
-        y, x = np.mgrid[0:self.height, 0:self.width].astype(np.float64)
-        vx = velocity_field[:,:,0]
-        vy = velocity_field[:,:,1]
-
-        x_prev = x - vx * dt * (self.width - 1)
-        y_prev = y - vy * dt * (self.height - 1)
-        
-        # Pas besoin de clip ici, map_coordinates le gère avec 'mode'
-        
-        coords = np.array([y_prev, x_prev])
-        
-        if field_to_advect.ndim == 3:
-            advected_field = np.zeros_like(field_to_advect)
-            for i in range(field_to_advect.shape[2]):
-                advected_field[:,:,i] = map_coordinates(field_to_advect[:,:,i], coords, order=1, mode='reflect')
+        v_initial_flat = self.v0.flatten()
+        if self.is_color:
+            u_final_channels = []
+            for i in range(3):
+                print(f"  Encrypting channel {i+1}/3...")
+                u_initial_flat = u0_padded[:, :, i].flatten()
+                u_final_c, _ = self._simulate_pass(u_initial_flat, v_initial_flat, forward=True, show_progress=False)
+                u_final_channels.append(u_final_c)
+            print("  Finalizing catalyst field...")
+            _, v_final_flat = self._simulate_pass(u_initial_flat, v_initial_flat, forward=True, show_progress=True)
+            u_final_flat = np.stack(u_final_channels, axis=-1).flatten()
         else:
-            advected_field = map_coordinates(field_to_advect, coords, order=1, mode='reflect')
-
-        return advected_field
-    
-    def _advect_pixels(self, initial_rho: np.ndarray, forward: bool = True) -> np.ndarray:
-        """
-        Advecte le champ de densité en utilisant les schémas appropriés.
-        """
-        num_steps = self.config['time_steps']
-        dt = self.config['dt']
-        rho_current = initial_rho.copy()
+            u_initial_flat = u0_padded.flatten()
+            u_final_flat, v_final_flat = self._simulate_pass(u_initial_flat, v_initial_flat, forward=True)
         
-        if forward:
-            print("Advecting pixels FORWARD (Encryption) using UPWIND scheme...")
-            time_indices = range(num_steps)
-            for n in tqdm(time_indices, desc="Forward Advection"):
-                velocity_field = self.u_history[n + 1]
-                rho_current = self._solve_advection(rho_current, velocity_field, dt)
+        return u_final_flat, v_final_flat
+
+    def decrypt(self, u_final_flat: np.ndarray, v_final_flat: np.ndarray) -> np.ndarray:
+        """
+        Runs the backward decryption process.
+
+        Args:
+            u_final_flat (np.ndarray): The final encrypted u-field (flattened).
+            v_final_flat (np.ndarray): The final catalyst v-field (flattened).
+
+        Returns:
+            np.ndarray: The decrypted 2D image array.
+        """
+        print("\n--- Running Decryption Pass ---")
+
+        if self.is_color:
+            u_final_channels_flat = u_final_flat.reshape(-1, 3)
+            decrypted_channels = []
+            for i in range(3):
+                print(f"  Decrypting channel {i+1}/3...")
+                u_final_c = u_final_channels_flat[:, i]
+                u_decrypted_c, _ = self._simulate_pass(u_final_c, v_final_flat, forward=False, show_progress=False)
+                decrypted_channels.append(u_decrypted_c.reshape(self.padded_shape))
+            
+            decrypted_padded = np.stack(decrypted_channels, axis=-1)
         else:
-            print("Advecting pixels BACKWARD (Decryption) using DOWNWIND scheme...")
-            time_indices = range(num_steps - 1, -1, -1)
-            for n in tqdm(time_indices, desc="Backward Advection"):
-                velocity_field = self.u_history[n + 1]
-                rho_current = self._solve_advection(rho_current, velocity_field, -dt)
-                
-        return rho_current
+            u_decrypted_flat, _ = self._simulate_pass(u_final_flat, v_final_flat, forward=False)
+            decrypted_padded = u_decrypted_flat.reshape(self.padded_shape)
+
+        pad = self.config['pad_width']
+        decrypted_image = decrypted_padded[pad:-pad, pad:-pad, :] if self.is_color else decrypted_padded[pad:-pad, pad:-pad]
+        
+        return decrypted_image
+
+    # ======================================================================
+    # Private methods for initialization and simulation
+    # ======================================================================
+
+    def _derive_parameters(self):
+        """Derives Gray-Scott model parameters from the key (Paper's Algorithm 1)."""
+        hash_digest = hashlib.sha256(self.key.encode()).digest()
+        seed = int.from_bytes(hash_digest[:4], 'big')
+        self.prng = np.random.default_rng(seed)
+
+        map_range = lambda x, r: r[0] + x * (r[1] - r[0])
+
+        self.params['f_rate'] = map_range(self.prng.random(), self.F_RATE_RANGE)
+        self.params['k_rate'] = map_range(self.prng.random(), self.K_RATE_RANGE)
+        self.params['ru_rate'] = map_range(self.prng.random(), self.RU_RATE_RANGE)
+        self.params['rv_rate'] = self.params['ru_rate'] / 2.0
+        self.params['T'] = map_range(self.prng.random(), self.TIME_RANGE)
+        
+        self.params['n_steps'] = int(self.params['T'] / self.config['dt'])
+
+    def _synthesize_initial_catalyst(self) -> np.ndarray:
+        """Generates the initial catalyst field v0 (Paper's Algorithm 2)."""
+        v0 = np.zeros(self.padded_shape)
+        num_kernels = self.prng.integers(3, 8)
+        
+        for _ in range(num_kernels):
+            xc = self.prng.integers(0, self.Nx)
+            yc = self.prng.integers(0, self.Ny)
+            A = self.prng.uniform(0.1, 0.5)
+            sigma = self.prng.uniform(5.0, 15.0)
+            
+            for i in range(self.Nx):
+                for j in range(self.Ny):
+                    dist_sq = (i - xc)**2 + (j - yc)**2
+                    v0[i, j] += A * np.exp(-dist_sq / (2 * sigma**2))
+            
+        return v0
+
+    def _laplacian_matrix(self) -> sp.csr_matrix:
+        """Builds the 2D Laplacian matrix with Neumann boundary conditions."""
+        dx2, dy2 = (1.0 / self.Nx)**2, (1.0 / self.Ny)**2 # Domain size is normalized
+        
+        Ix = sp.eye(self.Nx)
+        Iy = sp.eye(self.Ny)
+        
+        Dx = sp.diags([1, -2, 1], [-1, 0, 1], shape=(self.Nx, self.Nx)) * dx2
+        Dy = sp.diags([1, -2, 1], [-1, 0, 1], shape=(self.Ny, self.Ny)) * dy2
+        
+        Dx, Dy = Dx.tolil(), Dy.tolil()
+        Dx[0, :2], Dx[-1, -2:] = [2, -2], [2, -2]
+        Dy[0, :2], Dy[-1, -2:] = [2, -2], [2, -2]
+        
+        return (sp.kron(Iy, Dx) + sp.kron(Dy, Ix)).tocsr()
+    
+    def _simulate_pass(self, u_initial, v_initial, forward=True, show_progress=True):
+        """Runs a full simulation pass (forward or backward)."""
+        u, v = u_initial.copy(), v_initial.copy()
+        dt = self.config['dt'] if forward else -self.config['dt']
+        p = self.params
+        
+        desc = "Encrypting" if forward else "Decrypting"
+        iterator = tqdm(range(p['n_steps']), desc=desc, ncols=80) if show_progress else range(p['n_steps'])
+
+        for _ in iterator:
+            u, v = self._strang_step(u, v, p['ru_rate'], p['rv_rate'], p['f_rate'], p['k_rate'], self.L_op, dt)
+        
+        return u, v
+        
+    # --- Strang-Splitting Numerical Scheme ---
+    
+    def _strang_step(self, u, v, ru, rv, f, k, L, dt):
+        """Performs one full time-reversible Strang-splitting step."""
+        u1, v1 = self._reaction_half_step(u, v, f, k, dt)
+        u2, v2 = self._diffusion_step(u1, v1, ru, rv, L, dt)
+        u_new, v_new = self._reaction_half_step(u2, v2, f, k, dt)
+        return u_new, v_new
+        
+    def _diffusion_step(self, u, v, ru, rv, L, dt):
+        """Implicit diffusion step using Crank-Nicolson."""
+        N = u.size
+        I = sp.eye(N)
+        A_u, B_u = I - 0.5 * dt * ru * L, I + 0.5 * dt * ru * L
+        A_v, B_v = I - 0.5 * dt * rv * L, I + 0.5 * dt * rv * L
+        u_new = spla.spsolve(A_u, B_u @ u)
+        v_new = spla.spsolve(A_v, B_v @ v)
+        return u_new, v_new
+
+    def _reaction_half_step(self, u_flat, v_flat, f, k, dt):
+        """Implicit reaction step using a JIT-compiled vectorized Newton-Raphson solver."""
+        tau = 0.5 * dt
+        u_new_flat, v_new_flat = _reaction_solver_numba(
+            u_flat, v_flat, f, k, tau
+        )
+        
+        # clipping results to ensure stability
+        np.clip(u_new_flat, 0, 2, out=u_new_flat)
+        np.clip(v_new_flat, 0, 2, out=v_new_flat)
+
+        return u_new_flat, v_new_flat
