@@ -1,25 +1,45 @@
+import json
 import numpy as np
 from PIL import Image
-import os
+from typing import Dict, Any
 
-def load_image_as_array(image_path: str) -> np.ndarray:
-    """Loads an image, converts to grayscale, and normalizes to [0.0, 1.0]."""
+
+def load_image_as_array(image_path: str, grayscale: bool = False) -> np.ndarray:
+    """
+    Loads an image and normalizes it to [0.0, 1.0].
+    
+    Args:
+        image_path (str): Path to the source image.
+        grayscale (bool): If True, converts the image to grayscale. 
+                          Otherwise, keeps it as RGB.
+
+    Returns:
+        np.ndarray: The normalized image array (H, W) or (H, W, C).
+    """
     try:
         with Image.open(image_path) as img:
-            img_gray = img.convert('L')
-            return np.array(img_gray, dtype=np.float64) / 255.0
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Error: Input file '{image_path}' not found.")
+            if grayscale:
+                img = img.convert('L')
+            else:
+                img = img.convert('RGB')
+            return np.array(img, dtype=np.float64) / 255.0
     except Exception as e:
-        raise IOError(f"Error loading image: {e}")
+        raise IOError(f"Error loading image '{image_path}': {e}")
 
 def save_array_as_image(image_array: np.ndarray, output_path: str):
-    """Saves a NumPy array as a grayscale image, clipping values to [0, 1]."""
+    """
+    Saves a NumPy array as an image. Handles both grayscale and RGB.
+    Values are clipped to [0, 1] then scaled to [0, 255].
+    """
     try:
-        # Clip values to the valid range [0, 1] before scaling
+        if image_array.ndim not in [2, 3]:
+            raise ValueError("Input array must be 2D (grayscale) or 3D (RGB).")
+
         clipped_array = np.clip(image_array, 0.0, 1.0)
         img_data = (clipped_array * 255).astype(np.uint8)
-        Image.fromarray(img_data, 'L').save(output_path)
+        
+        mode = 'L' if image_array.ndim == 2 else 'RGB'
+        Image.fromarray(img_data, mode).save(output_path)
         print(f"Image successfully saved to '{output_path}'")
     except Exception as e:
         raise IOError(f"Error saving image: {e}")
@@ -49,3 +69,25 @@ def load_state_from_npz(input_path: str) -> tuple:
         raise FileNotFoundError(f"Encrypted data file not found: '{input_path}'")
     except Exception as e:
         raise IOError(f"Error loading .npz data: {e}")
+
+def load_config_from_json(config_path: str) -> Dict[str, Any]:
+    """
+    Loads configuration from a JSON file.
+
+    Args:
+        config_path (str): The path to the .json configuration file.
+
+    Returns:
+        Dict[str, Any]: A dictionary with the loaded parameters.
+    """
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        print(f"Configuration loaded from '{config_path}'")
+        return config if config else {}
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Config file not found: '{config_path}'")
+    except json.JSONDecodeError:
+        raise ValueError(f"Error decoding JSON from '{config_path}'. Check for syntax errors.")
+    except Exception as e:
+        raise IOError(f"Error reading config file: {e}")

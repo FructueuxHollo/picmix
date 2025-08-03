@@ -30,7 +30,7 @@ def encrypt(
         save_preview (bool): If True, saves a .png preview of the encrypted image.
     """
     print("--- VortexCrypt Encryption ---")
-    original_array = load_image_as_array(image_path)
+    original_array = load_image_as_array(image_path, grayscale=False)
     
     engine = VortexCryptEngine(key=key, image_shape=original_array.shape, config=config)
     
@@ -44,10 +44,16 @@ def encrypt(
     )
     
     if save_preview:
-        u_final_2d = u_final_flat.reshape(engine.padded_shape)
+        if engine.is_color:
+            num_pixels_padded = engine.padded_shape[0] * engine.padded_shape[1]
+            u_final_red_channel_flat = u_final_flat.reshape(-1, 3)[:, 0]
+            u_preview = u_final_red_channel_flat.reshape(engine.padded_shape)
+        else:
+            u_preview = u_final_flat.reshape(engine.padded_shape)
+
         pad = engine.config['pad_width']
         preview_path = os.path.splitext(output_path_npz)[0] + ".png"
-        save_array_as_image(u_final_2d[pad:-pad, pad:-pad], preview_path)
+        save_array_as_image(u_preview[pad:-pad, pad:-pad], preview_path)
     
     print("--- Encryption Complete ---")
 
@@ -70,8 +76,13 @@ def decrypt(
     u_final_flat, v_final_flat, padded_shape = load_state_from_npz(encrypted_state_path_npz)
     
     pad = config.get('pad_width', 1) if config else 1
-    original_shape = (padded_shape[0] - 2 * pad, padded_shape[1] - 2 * pad)
+    is_color = (u_final_flat.size == 3 * v_final_flat.size)
     
+    if is_color:
+        original_shape = (padded_shape[0] - 2*pad, padded_shape[1] - 2*pad, 3)
+    else:
+        original_shape = (padded_shape[0] - 2*pad, padded_shape[1] - 2*pad)
+
     engine = VortexCryptEngine(key=key, image_shape=original_shape, config=config)
     
     decrypted_image = engine.decrypt(u_final_flat, v_final_flat)

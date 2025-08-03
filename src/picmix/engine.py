@@ -5,6 +5,81 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from scipy.optimize import root
 from tqdm import tqdm
+from numba import jit
+
+@jit(nopython=True, fastmath=True)
+def _newton_raphson_step_2x2(u0, v0, u1, v1, f, k, tau):
+    """Effectue une seule itération de Newton-Raphson pour le système 2x2."""
+    # Évaluation au point milieu
+    u_bar, v_bar = 0.5 * (u0 + u1), 0.5 * (v0 + v1)
+    
+    # Calcul des résidus (valeur de la fonction F)
+    uv2 = u_bar * v_bar**2
+    res_u = u1 - u0 - tau * (-uv2 + f * (1 - u_bar))
+    res_v = v1 - v0 - tau * (uv2 - (f + k) * v_bar)
+    
+    # Calcul du Jacobien
+    
+    j11 = 1.0 + 0.5 * tau * (-v_bar**2 + f)
+    j12 = tau * u_bar * v_bar
+    j21 = -0.5 * tau * v_bar**2
+    j22 = 1.0 - 0.5 * tau * (2 * u_bar * v_bar - (f + k))
+    
+    # Inversion de la matrice Jacobienne 2x2
+    det = j11 * j22 - j12 * j21
+    safe_mask = np.abs(det)> 1e-12
+
+    # Initialiser les mises à jour à zéro
+    delta_u = np.zeros_like(u0)
+    delta_v = np.zeros_like(v0)
+
+    # Appliquer le masque 1D. Numba supporte cela.
+    safe_det = det[safe_mask]
+    safe_j11, safe_j12 = j11[safe_mask], j12[safe_mask]
+    safe_j21, safe_j22 = j21[safe_mask], j22[safe_mask]
+    safe_res_u, safe_res_v = res_u[safe_mask], res_v[safe_mask]
+    
+    inv_det = 1.0 / safe_det
+    
+    # Calcul du pas de Newton uniquement sur les éléments sûrs
+    safe_delta_u = -( (safe_j22 * inv_det) * safe_res_u + (-safe_j12 * inv_det) * safe_res_v )
+    safe_delta_v = -( (-safe_j21 * inv_det) * safe_res_u + (safe_j11 * inv_det) * safe_res_v )
+    
+    # Placer les deltas calculés dans les tableaux de mise à jour complets
+    delta_u[safe_mask] = safe_delta_u
+    delta_v[safe_mask] = safe_delta_v
+    
+    # Mise à jour de la solution
+    u1_new = u1 + delta_u
+    v1_new = v1 + delta_v
+    
+    return u1_new, v1_new
+
+@jit(nopython=True, fastmath=True)
+def _reaction_solver_numba(u_flat, v_flat, f, k, tau, max_iter=5, tol=1e-6):
+    """
+    Solveur de Newton-Raphson vectorisé pour tableaux 1D.
+    """
+    u0 = u_flat
+    v0 = v_flat
+    
+    # L'estimation initiale est simplement l'état précédent
+    u1 = u0.copy()
+    v1 = v0.copy()
+
+    for _ in range(max_iter):
+        u1_old, v1_old = u1.copy(), v1.copy()
+        
+        # L'itération de Newton est appliquée à tous les pixels en même temps
+        u1, v1 = _newton_raphson_step_2x2(u0, v0, u1, v1, f, k, tau)
+        
+        # Vérification de la convergence
+        error_u = np.abs(u1 - u1_old)
+        error_v = np.abs(v1 - v1_old)
+        if np.max(error_u) < tol and np.max(error_v) < tol:
+            break
+            
+    return u1, v1
 
 class VortexCryptEngine:
     """
@@ -17,7 +92,7 @@ class VortexCryptEngine:
     RU_RATE_RANGE: Tuple[float, float] = (0.1, 0.2)
     TIME_RANGE: Tuple[float, float] = (20.0, 100.0) # Total simulation time
 
-    def __init__(self, key: str, image_shape: Tuple[int, int], config: Dict[str, Any] = None):
+    def __init__(self, key: str, image_shape: Tuple, config: Dict[str, Any] = None):
         """
         Initializes the simulation engine.
 
@@ -31,10 +106,11 @@ class VortexCryptEngine:
 
         self.key = key
         self.original_shape = image_shape
+        self.is_color = len(image_shape) == 3
         
         # --- 1. Configuration ---
         self.config = {
-            'dt': 1.0,
+            'dt': 0.2,
             'pad_width': 1
         }
         if config:
@@ -53,10 +129,7 @@ class VortexCryptEngine:
         self.v0 = self._synthesize_initial_catalyst()
         self.L_op = self._laplacian_matrix()
         
-        print("VortexCrypt Engine initialized.")
-        print(f"  - Padded domain size: {self.Nx}x{self.Ny}")
-        print(f"  - Derived params: f={self.params['f_rate']:.4f}, k={self.params['k_rate']:.4f}, "
-              f"ru={self.params['ru_rate']:.4f}, T={self.params['T']:.2f} ({self.params['n_steps']} steps)")
+        print(f"VortexCrypt Engine initialized for {'COLOR' if self.is_color else 'GRAYSCALE'} image.")
 
     def encrypt(self, image_array: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -69,17 +142,30 @@ class VortexCryptEngine:
             Tuple[np.ndarray, np.ndarray]: The final flattened states u(T) and v(T).
         """
         print("\n--- Running Encryption Pass ---")
+        pad_width = ((self.config['pad_width'], self.config['pad_width']),
+                     (self.config['pad_width'], self.config['pad_width']),
+                     (0, 0)) if self.is_color else self.config['pad_width']
         u0_padded = np.pad(
             image_array.astype(np.float64),
-            pad_width=self.config['pad_width'],
+            pad_width=pad_width,
             mode='reflect'
         )
+
+        v_initial_flat = self.v0.flatten()
+        if self.is_color:
+            u_final_channels = []
+            for i in range(3):
+                print(f"  Encrypting channel {i+1}/3...")
+                u_initial_flat = u0_padded[:, :, i].flatten()
+                u_final_c, _ = self._simulate_pass(u_initial_flat, v_initial_flat, forward=True, show_progress=False)
+                u_final_channels.append(u_final_c)
+            print("  Finalizing catalyst field...")
+            _, v_final_flat = self._simulate_pass(u_initial_flat, v_initial_flat, forward=True, show_progress=True)
+            u_final_flat = np.stack(u_final_channels, axis=-1).flatten()
+        else:
+            u_initial_flat = u0_padded.flatten()
+            u_final_flat, v_final_flat = self._simulate_pass(u_initial_flat, v_initial_flat, forward=True)
         
-        u_final_flat, v_final_flat = self._simulate_pass(
-            u_initial=u0_padded.flatten(),
-            v_initial=self.v0.flatten(),
-            forward=True
-        )
         return u_final_flat, v_final_flat
 
     def decrypt(self, u_final_flat: np.ndarray, v_final_flat: np.ndarray) -> np.ndarray:
@@ -94,15 +180,23 @@ class VortexCryptEngine:
             np.ndarray: The decrypted 2D image array.
         """
         print("\n--- Running Decryption Pass ---")
-        u_decrypted_flat, _ = self._simulate_pass(
-            u_initial=u_final_flat,
-            v_initial=v_final_flat,
-            forward=False
-        )
-        
-        decrypted_padded = u_decrypted_flat.reshape(self.padded_shape)
+
+        if self.is_color:
+            u_final_channels_flat = u_final_flat.reshape(-1, 3)
+            decrypted_channels = []
+            for i in range(3):
+                print(f"  Decrypting channel {i+1}/3...")
+                u_final_c = u_final_channels_flat[:, i]
+                u_decrypted_c, _ = self._simulate_pass(u_final_c, v_final_flat, forward=False, show_progress=False)
+                decrypted_channels.append(u_decrypted_c.reshape(self.padded_shape))
+            
+            decrypted_padded = np.stack(decrypted_channels, axis=-1)
+        else:
+            u_decrypted_flat, _ = self._simulate_pass(u_final_flat, v_final_flat, forward=False)
+            decrypted_padded = u_decrypted_flat.reshape(self.padded_shape)
+
         pad = self.config['pad_width']
-        decrypted_image = decrypted_padded[pad:-pad, pad:-pad]
+        decrypted_image = decrypted_padded[pad:-pad, pad:-pad, :] if self.is_color else decrypted_padded[pad:-pad, pad:-pad]
         
         return decrypted_image
 
@@ -131,16 +225,16 @@ class VortexCryptEngine:
         v0 = np.zeros(self.padded_shape)
         num_kernels = self.prng.integers(3, 8)
         
-        y_coords, x_coords = np.ogrid[:self.Ny, :self.Nx]
-
         for _ in range(num_kernels):
             xc = self.prng.integers(0, self.Nx)
             yc = self.prng.integers(0, self.Ny)
             A = self.prng.uniform(0.1, 0.5)
             sigma = self.prng.uniform(5.0, 15.0)
             
-            dist_sq = (x_coords - xc)**2 + (y_coords - yc)**2
-            v0 += A * np.exp(-dist_sq / (2 * sigma**2))
+            for i in range(self.Nx):
+                for j in range(self.Ny):
+                    dist_sq = (i - xc)**2 + (j - yc)**2
+                    v0[i, j] += A * np.exp(-dist_sq / (2 * sigma**2))
             
         return v0
 
@@ -194,26 +288,14 @@ class VortexCryptEngine:
         return u_new, v_new
 
     def _reaction_half_step(self, u_flat, v_flat, f, k, dt):
-        """Implicit reaction step using midpoint rule, solved per-pixel."""
+        """Implicit reaction step using a JIT-compiled vectorized Newton-Raphson solver."""
         tau = 0.5 * dt
-        u0_2d, v0_2d = u_flat.reshape(self.padded_shape), v_flat.reshape(self.padded_shape)
-        u1_2d, v1_2d = np.zeros_like(u0_2d), np.zeros_like(v0_2d)
+        u_new_flat, v_new_flat = _reaction_solver_numba(
+            u_flat, v_flat, f, k, tau
+        )
         
-        for i in range(self.Nx):
-            for j in range(self.Ny):
-                u0, v0 = u0_2d[i, j], v0_2d[i, j]
+        # clipping results to ensure stability
+        np.clip(u_new_flat, 0, 2, out=u_new_flat)
+        np.clip(v_new_flat, 0, 2, out=v_new_flat)
 
-                def F(w1):
-                    u1, v1 = w1
-                    u_bar, v_bar = 0.5 * (u0 + u1), 0.5 * (v0 + v1)
-                    uv2 = u_bar * v_bar**2
-                    eq_u = u1 - u0 - tau * (-uv2 + f * (1 - u_bar))
-                    eq_v = v1 - v0 - tau * (uv2 - (f + k) * v_bar)
-                    return [eq_u, eq_v]
-
-                sol = root(F, [u0, v0], method='hybr')
-                if not sol.success:
-                    raise RuntimeError(f"Non-linear solver failed at pixel ({i}, {j}).")
-                u1_2d[i, j], v1_2d[i, j] = sol.x
-
-        return u1_2d.flatten(), v1_2d.flatten()
+        return u_new_flat, v_new_flat
