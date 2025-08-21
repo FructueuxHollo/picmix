@@ -14,7 +14,8 @@ def encrypt(
     output_path_npz: str,
     key: str,
     config_path: Optional[str] = None,
-    save_preview: bool = True
+    save_preview: bool = True,
+    grayscale: bool = False
 ):
     """
     Encrypts an image using the VortexCrypt algorithm.
@@ -32,7 +33,7 @@ def encrypt(
     print("--- VortexCrypt Encryption ---")
     config = load_config_from_json(config_path) if config_path else None
 
-    original_array = load_image_as_array(image_path, grayscale=False)
+    original_array = load_image_as_array(image_path, grayscale=grayscale)
     
     engine = VortexCryptEngine(key=key, image_shape=original_array.shape, config=config)
     

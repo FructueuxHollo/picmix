@@ -24,19 +24,23 @@ def encrypt(
     key: Annotated[str, typer.Option(prompt=True, confirmation_prompt=True, hide_input=True, help="Secret key (8-24 characters).")],
     output: Annotated[str, typer.Option("--output", "-o", help="Path for the output .npz file. [default: encrypted_state.npz]")] = "encrypted_state.npz",
     config: Annotated[str, typer.Option("--config", "-c", help="Path to an optional JSON configuration file.")] = None,
+    grayscale: Annotated[bool, typer.Option("--grayscale", "-g", help="Force encryption in grayscale, even for color images.")] = False,
     no_preview: Annotated[bool, typer.Option("--no-preview", help="Disable saving a .png preview of the encrypted image.")] = False,
 ):
     """
     Encrypts an image file using the VortexCrypt algorithm.
     """
     typer.echo(f"Encrypting '{image_path.name}'...")
+    if grayscale:
+        typer.echo("Mode: Grayscale encryption enabled.")
     try:
         encrypt_api(
             image_path=image_path.name,
             output_path_npz=output,
             key=key,
             config_path=config,
-            save_preview=not no_preview
+            save_preview=not no_preview,
+            grayscale=grayscale
         )
         typer.secho(f"✅ Encryption successful! State saved to '{output}.npz'", fg=typer.colors.GREEN)
         if not no_preview:
