@@ -6,7 +6,7 @@ VortexCrypt provides a robust framework for encrypting and decrypting digital im
 
 The core of its security and functionality lies in a mathematically proven **time-reversible numerical integrator (Strang-Splitting)**, which guarantees that the decryption process is a true inverse of the encryption, allowing for near-perfect reconstruction of the original image (limited only by floating-point precision).
 
-  <!-- Vous pouvez générer et héberger un diagramme de votre workflow ici -->
+  ![VortexCrypt Workflow Diagram](docs/images/workflow.png)
 
 ## Features
 

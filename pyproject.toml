@@ -2,9 +2,12 @@
 name = "vortexcrypt"
 version = "1.0.0"
 description = "A novel image encryption package based on time-reversible reaction-diffusion systems."
-authors = ["FructueuxHollo <fructueuxhollo@gmail.com>"]
+authors = ["Fructueux Hollo <fructueuxhollo@gmail.com>, Charbel Mamlankou <charbelzeusmamlankou@gmail.com>, Jude Agbodoyetin <judeseruch@gmail.com>"]
 license = "MIT"
 readme = "README.md"
+homepage = "https://github.com/FructueuxHollo/vortexcrypt"
+repository = "https://github.com/FructueuxHollo/vortexcrypt"
+keywords = ["encryption", "image processing", "reaction-diffusion", "cryptography", "Gray-Scott"]
 packages = [{include = "vortexcrypt", from = "src"}]
 
 

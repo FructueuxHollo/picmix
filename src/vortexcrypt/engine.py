@@ -9,31 +9,31 @@ from numba import jit
 
 @jit(nopython=True, fastmath=True)
 def _newton_raphson_step_2x2(u0, v0, u1, v1, f, k, tau):
-    """Effectue une seule itération de Newton-Raphson pour le système 2x2."""
-    # Évaluation au point milieu
+    """Performs a single Newton-Raphson iteration for the 2x2 system."""
+    # Mid-point assessment
     u_bar, v_bar = 0.5 * (u0 + u1), 0.5 * (v0 + v1)
     
-    # Calcul des résidus (valeur de la fonction F)
+    # Calculation of residuals (value of function F)
     uv2 = u_bar * v_bar**2
     res_u = u1 - u0 - tau * (-uv2 + f * (1 - u_bar))
     res_v = v1 - v0 - tau * (uv2 - (f + k) * v_bar)
     
-    # Calcul du Jacobien
+    # Calculation of the Jacobian
     
     j11 = 1.0 + 0.5 * tau * (-v_bar**2 + f)
     j12 = tau * u_bar * v_bar
     j21 = -0.5 * tau * v_bar**2
     j22 = 1.0 - 0.5 * tau * (2 * u_bar * v_bar - (f + k))
     
-    # Inversion de la matrice Jacobienne 2x2
+    # Inversion of the 2x2 Jacobian matrix
     det = j11 * j22 - j12 * j21
     safe_mask = np.abs(det)> 1e-12
 
-    # Initialiser les mises à jour à zéro
+    # Initialize updates to zero
     delta_u = np.zeros_like(u0)
     delta_v = np.zeros_like(v0)
 
-    # Appliquer le masque 1D. Numba supporte cela.
+    # Apply the 1D mask.
     safe_det = det[safe_mask]
     safe_j11, safe_j12 = j11[safe_mask], j12[safe_mask]
     safe_j21, safe_j22 = j21[safe_mask], j22[safe_mask]
@@ -41,15 +41,15 @@ def _newton_raphson_step_2x2(u0, v0, u1, v1, f, k, tau):
     
     inv_det = 1.0 / safe_det
     
-    # Calcul du pas de Newton uniquement sur les éléments sûrs
+    # Calculation of Newton's step only on safe elements
     safe_delta_u = -( (safe_j22 * inv_det) * safe_res_u + (-safe_j12 * inv_det) * safe_res_v )
     safe_delta_v = -( (-safe_j21 * inv_det) * safe_res_u + (safe_j11 * inv_det) * safe_res_v )
     
-    # Placer les deltas calculés dans les tableaux de mise à jour complets
+    # Place the calculated deltas in the full update tables
     delta_u[safe_mask] = safe_delta_u
     delta_v[safe_mask] = safe_delta_v
     
-    # Mise à jour de la solution
+    # Solution Update
     u1_new = u1 + delta_u
     v1_new = v1 + delta_v
     
@@ -58,22 +58,21 @@ def _newton_raphson_step_2x2(u0, v0, u1, v1, f, k, tau):
 @jit(nopython=True, fastmath=True)
 def _reaction_solver_numba(u_flat, v_flat, f, k, tau, max_iter=5, tol=1e-6):
     """
-    Solveur de Newton-Raphson vectorisé pour tableaux 1D.
+    Vectorized Newton-Raphson solver for 1D arrays.
     """
     u0 = u_flat
     v0 = v_flat
     
-    # L'estimation initiale est simplement l'état précédent
     u1 = u0.copy()
     v1 = v0.copy()
 
     for _ in range(max_iter):
         u1_old, v1_old = u1.copy(), v1.copy()
         
-        # L'itération de Newton est appliquée à tous les pixels en même temps
+        # Newton's iteration is applied to all pixels at the same time
         u1, v1 = _newton_raphson_step_2x2(u0, v0, u1, v1, f, k, tau)
         
-        # Vérification de la convergence
+        # Convergence Check
         error_u = np.abs(u1 - u1_old)
         error_v = np.abs(v1 - v1_old)
         if np.max(error_u) < tol and np.max(error_v) < tol:
