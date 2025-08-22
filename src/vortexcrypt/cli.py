@@ -21,7 +21,7 @@ def version_callback(value: bool):
 @app.command()
 def encrypt(
     image_path: Annotated[typer.FileText, typer.Argument(help="Path to the source image file.")],
-    key: Annotated[str, typer.Option(prompt=True, confirmation_prompt=True, hide_input=True, help="Secret key (8-24 characters).")],
+    key: Annotated[str, typer.Option(prompt=True, confirmation_prompt=True, hide_input=True, help="Secret key.")],
     output: Annotated[str, typer.Option("--output", "-o", help="Path for the output .npz file. [default: encrypted_state.npz]")] = "encrypted_state.npz",
     config: Annotated[str, typer.Option("--config", "-c", help="Path to an optional JSON configuration file.")] = None,
     grayscale: Annotated[bool, typer.Option("--grayscale", "-g", help="Force encryption in grayscale, even for color images.")] = False,

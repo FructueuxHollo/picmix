@@ -51,8 +51,13 @@ def save_array_as_image(image_array: np.ndarray, output_path: str):
         if image_array.ndim not in [2, 3]:
             raise ValueError("Input array must be 2D (grayscale) or 3D (RGB).")
 
-        clipped_array = np.clip(image_array, 0.0, 1.0)
-        img_data = (clipped_array * 255).astype(np.uint8)
+        min_val = image_array.min()
+        max_val = image_array.max()
+        if max_val > min_val:
+            norm_array = (image_array - min_val) / (max_val - min_val)
+        else:
+            norm_array = np.zeros_like(image_array)
+        img_data = (norm_array * 255).astype(np.uint8)
         
         mode = 'L' if image_array.ndim == 2 else 'RGB'
         Image.fromarray(img_data, mode).save(output_path)

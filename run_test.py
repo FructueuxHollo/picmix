@@ -19,7 +19,7 @@ vortexcrypt.encrypt(
     key=SECRET_PASSPHRASE,
     output_path_npz=encrypted_data_path,
     save_preview=True,
-    grayscale=True
+    grayscale=False
 )
 print("\n" + "="*50 + "\n")
 

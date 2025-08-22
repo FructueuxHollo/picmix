@@ -89,19 +89,19 @@ class VortexCryptEngine:
     F_RATE_RANGE: Tuple[float, float] = (0.01, 0.1)
     K_RATE_RANGE: Tuple[float, float] = (0.20, 1.0)
     RU_RATE_RANGE: Tuple[float, float] = (0.5, 2)
-    TIME_RANGE: Tuple[float, float] = (40, 100) # Total simulation time
+    TIME_RANGE: Tuple[float, float] = (240, 350) # Total simulation time
 
     def __init__(self, key: str, image_shape: Tuple, config: Dict[str, Any] = None):
         """
         Initializes the simulation engine.
 
         Args:
-            key (str): The secret key (8-24 characters).
+            key (str): The secret key.
             image_shape (Tuple[int, int]): The (height, width) of the original image.
             config (Dict, str, Any], optional): Dictionary to override default parameters.
         """
-        if not (8 <= len(key) <= 24):
-            raise ValueError("Key must be between 8 and 24 characters long.")
+        if not (8 <= len(key)):
+            raise ValueError("Key must be longer than 8 characters.")
 
         self.key = key
         self.original_shape = image_shape

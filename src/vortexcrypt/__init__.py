@@ -26,7 +26,7 @@ def encrypt(
     Args:
         image_path (str): Path to the source image.
         output_path_npz (str): Path to save the output .npz data file.
-        key (str): Secret key (8-24 characters).
+        key (str): Secret key.
         config (Dict, optional): Dictionary to override simulation parameters.
         save_preview (bool): If True, saves a .png preview of the encrypted image.
     """
