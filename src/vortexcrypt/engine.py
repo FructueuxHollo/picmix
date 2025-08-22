@@ -85,11 +85,11 @@ class VortexCryptEngine:
     Core engine for encryption/decryption based on the Gray-Scott
     reaction-diffusion model and a time-reversible Strang-splitting integrator.
     """
-    # Parameter ranges known to produce complex patterns ("mitosis")
+    # Parameter ranges 
     F_RATE_RANGE: Tuple[float, float] = (0.01, 0.1)
-    K_RATE_RANGE: Tuple[float, float] = (0.045, 0.07)
-    RU_RATE_RANGE: Tuple[float, float] = (0.1, 0.2)
-    TIME_RANGE: Tuple[float, float] = (20.0, 100.0) # Total simulation time
+    K_RATE_RANGE: Tuple[float, float] = (0.20, 1.0)
+    RU_RATE_RANGE: Tuple[float, float] = (0.5, 2)
+    TIME_RANGE: Tuple[float, float] = (40, 100) # Total simulation time
 
     def __init__(self, key: str, image_shape: Tuple, config: Dict[str, Any] = None):
         """
@@ -109,7 +109,7 @@ class VortexCryptEngine:
         
         # --- 1. Configuration ---
         self.config = {
-            'dt': 0.2,
+            'dt': 10,
             'pad_width': 1
         }
         if config:

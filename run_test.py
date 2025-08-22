@@ -5,7 +5,7 @@ SECRET_PASSPHRASE = "my_secret_passphrase"
 output_dir = "crypto_files"
 os.makedirs(output_dir, exist_ok=True)
 
-original_image_path = "text_test_image.png"
+original_image_path = "bart_test_image.png"
 
 encrypted_data_path = os.path.join(output_dir, "encrypted_data.npz")
 
@@ -18,6 +18,8 @@ vortexcrypt.encrypt(
     image_path=original_image_path,
     key=SECRET_PASSPHRASE,
     output_path_npz=encrypted_data_path,
+    save_preview=True,
+    grayscale=True
 )
 print("\n" + "="*50 + "\n")
 
