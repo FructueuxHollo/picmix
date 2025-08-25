@@ -24,7 +24,6 @@ You can install VortexCrypt using `pip`. It is recommended to install it in a vi
 ```bash
 pip install vortexcrypt
 ```
-*(Note: This package is not yet on PyPI. To install from local files, see the "Development" section below).*
 
 ## Quick Start: Command-Line Interface (CLI)
 
@@ -93,7 +92,7 @@ print("Decryption complete.")
 
 To install the package for development purposes:
 
-1.  Clone this repository: `git clone https://your-repo-url/vortexcrypt.git`
+1.  Clone this repository: `git clone https://github.com/FructueuxHollo/vortexcrypt.git`
 2.  Navigate into the directory: `cd vortexcrypt`
 3.  Install dependencies with Poetry: `poetry install`
 4.  Activate the virtual environment: `poetry shell`
@@ -102,3 +101,8 @@ To install the package for development purposes:
 ## License
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
+
+## Authors 
+
+Fructueux Hollo <fructueuxhollo@gmail.com>, Charbel Mamlankou <charbelzeusmamlankou@gmail.com>, Jude Agbodoyetin <judeseruch@gmail.com>, Ozias Deguenon <deguenonamen@gmail.com>, Marcellin Ogoungbe <ogoungbemarcellin@yahoo.com>, Jamal Adetola
+

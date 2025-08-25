@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "vortexcrypt"
-version = "1.0.4"
+version = "1.0.7"
 description = "A novel image encryption package based on time-reversible reaction-diffusion systems."
-authors = ["Fructueux Hollo <fructueuxhollo@gmail.com>, Charbel Mamlankou <charbelzeusmamlankou@gmail.com>, Jude Agbodoyetin <judeseruch@gmail.com>, Ozias Deguenon <deguenonamen@gmail.com>, Marcellin Ogoungbe <ogoungbemarcellin@yahoo.com>"]
+authors = ["Fructueux Hollo <fructueuxhollo@gmail.com>, Charbel Mamlankou <charbelzeusmamlankou@gmail.com>, Jude Agbodoyetin <judeseruch@gmail.com>, Ozias Deguenon <deguenonamen@gmail.com>, Marcellin Ogoungbe <ogoungbemarcellin@yahoo.com>, Jamal Adetola"]
 license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/FructueuxHollo/vortexcrypt"

@@ -87,9 +87,9 @@ class VortexCryptEngine:
     """
     # Parameter ranges 
     F_RATE_RANGE: Tuple[float, float] = (0.01, 0.1)
-    K_RATE_RANGE: Tuple[float, float] = (0.20, 1.0)
+    K_RATE_RANGE: Tuple[float, float] = (0.05, 0.05)
     RU_RATE_RANGE: Tuple[float, float] = (0.5, 2)
-    TIME_RANGE: Tuple[float, float] = (240, 350) # Total simulation time
+    TIME_RANGE: Tuple[float, float] = (300, 300) # Total simulation time
 
     def __init__(self, key: str, image_shape: Tuple, config: Dict[str, Any] = None):
         """
@@ -204,18 +204,40 @@ class VortexCryptEngine:
     # ======================================================================
 
     def _derive_parameters(self):
-        """Derives Gray-Scott model parameters from the key (Paper's Algorithm 1)."""
+        """
+        Derives Gray-Scott model parameters.
+        Prioritizes values from the config dictionary, otherwise derives from the key.
+        """
         hash_digest = hashlib.sha256(self.key.encode()).digest()
         seed = int.from_bytes(hash_digest[:4], 'big')
         self.prng = np.random.default_rng(seed)
 
         map_range = lambda x, r: r[0] + x * (r[1] - r[0])
 
-        self.params['f_rate'] = map_range(self.prng.random(), self.F_RATE_RANGE)
-        self.params['k_rate'] = map_range(self.prng.random(), self.K_RATE_RANGE)
-        self.params['ru_rate'] = map_range(self.prng.random(), self.RU_RATE_RANGE)
+        # for each parameter, we check if it's in the config file.
+        # else we extract it from the key.
+        
+        if 'f_rate' in self.config:
+            self.params['f_rate'] = self.config['f_rate']
+        else:
+            self.params['f_rate'] = map_range(self.prng.random(), self.F_RATE_RANGE)
+
+        if 'k_rate' in self.config:
+            self.params['k_rate'] = self.config['k_rate']
+        else:
+            self.params['k_rate'] = map_range(self.prng.random(), self.K_RATE_RANGE)
+
+        if 'ru_rate' in self.config:
+            self.params['ru_rate'] = self.config['ru_rate']
+        else:
+            self.params['ru_rate'] = map_range(self.prng.random(), self.RU_RATE_RANGE)
+            
         self.params['rv_rate'] = self.params['ru_rate'] / 2.0
-        self.params['T'] = map_range(self.prng.random(), self.TIME_RANGE)
+
+        if 'T' in self.config:
+            self.params['T'] = self.config['T']
+        else:
+            self.params['T'] = map_range(self.prng.random(), self.TIME_RANGE)
         
         self.params['n_steps'] = int(self.params['T'] / self.config['dt'])
 

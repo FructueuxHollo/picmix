@@ -2,7 +2,7 @@ import vortexcrypt
 import os
 
 SECRET_PASSPHRASE = "my_secret_passphrase"
-output_dir = "crypto_files"
+output_dir = "output_quick_test"
 os.makedirs(output_dir, exist_ok=True)
 
 original_image_path = "bart_test_image.png"
@@ -19,7 +19,7 @@ vortexcrypt.encrypt(
     key=SECRET_PASSPHRASE,
     output_path_npz=encrypted_data_path,
     save_preview=True,
-    grayscale=False
+    grayscale=False,
 )
 print("\n" + "="*50 + "\n")
 
