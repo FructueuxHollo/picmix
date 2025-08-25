@@ -24,7 +24,6 @@ You can install VortexCrypt using `pip`. It is recommended to install it in a vi
 ```bash
 pip install vortexcrypt
 ```
-*(Note: This package is not yet on PyPI. To install from local files, see the "Development" section below).*
 
 ## Quick Start: Command-Line Interface (CLI)
 
