@@ -8,23 +8,39 @@ def load_image_as_array(image_path: str, grayscale: bool = False) -> np.ndarray:
     """
     Loads an image and normalizes it to [0.0, 1.0].
     
+    If grayscale is True, forces conversion to grayscale.
+    Otherwise, automatically detects if the image is color or grayscale.
+
     Args:
         image_path (str): Path to the source image.
-        grayscale (bool): If True, converts the image to grayscale. 
-                          Otherwise, keeps it as RGB.
+        grayscale (bool): If True, forces conversion to grayscale.
 
     Returns:
-        np.ndarray: The normalized image array (H, W) or (H, W, C).
+        np.ndarray: The normalized image array, as (H, W) for grayscale
+                    or (H, W, 3) for color.
     """
     try:
-        with Image.open(image_path) as img:
+        with Image.open(image_path) as img:            
             if grayscale:
-                img = img.convert('L')
+                img_gray = img.convert('L')
+                return np.array(img_gray, dtype=np.float64) / 255.0
+
+            img_rgb = img.convert('RGB')
+            img_array_rgb = np.array(img_rgb, dtype=np.uint8)
+
+            r, g, b = img_array_rgb[:, :, 0], img_array_rgb[:, :, 1], img_array_rgb[:, :, 2]
+            
+            is_grayscale_auto = np.array_equal(r, g) and np.array_equal(g, b)
+            
+            if is_grayscale_auto:
+                return r.astype(np.float64) / 255.0
             else:
-                img = img.convert('RGB')
-            return np.array(img, dtype=np.float64) / 255.0
+                return img_array_rgb.astype(np.float64) / 255.0
+
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Error: Input file '{image_path}' not found.")
     except Exception as e:
-        raise IOError(f"Error loading image '{image_path}': {e}")
+        raise IOError(f"Error loading image: {e}")
 
 def save_array_as_image(image_array: np.ndarray, output_path: str):
     """
@@ -35,8 +51,13 @@ def save_array_as_image(image_array: np.ndarray, output_path: str):
         if image_array.ndim not in [2, 3]:
             raise ValueError("Input array must be 2D (grayscale) or 3D (RGB).")
 
-        clipped_array = np.clip(image_array, 0.0, 1.0)
-        img_data = (clipped_array * 255).astype(np.uint8)
+        min_val = image_array.min()
+        max_val = image_array.max()
+        if max_val > min_val:
+            norm_array = (image_array - min_val) / (max_val - min_val)
+        else:
+            norm_array = np.zeros_like(image_array)
+        img_data = (norm_array * 255).astype(np.uint8)
         
         mode = 'L' if image_array.ndim == 2 else 'RGB'
         Image.fromarray(img_data, mode).save(output_path)

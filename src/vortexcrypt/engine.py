@@ -85,23 +85,23 @@ class VortexCryptEngine:
     Core engine for encryption/decryption based on the Gray-Scott
     reaction-diffusion model and a time-reversible Strang-splitting integrator.
     """
-    # Parameter ranges known to produce complex patterns ("mitosis")
+    # Parameter ranges 
     F_RATE_RANGE: Tuple[float, float] = (0.01, 0.1)
-    K_RATE_RANGE: Tuple[float, float] = (0.045, 0.07)
-    RU_RATE_RANGE: Tuple[float, float] = (0.1, 0.2)
-    TIME_RANGE: Tuple[float, float] = (20.0, 100.0) # Total simulation time
+    K_RATE_RANGE: Tuple[float, float] = (0.05, 0.05)
+    RU_RATE_RANGE: Tuple[float, float] = (0.5, 2)
+    TIME_RANGE: Tuple[float, float] = (300, 300) # Total simulation time
 
     def __init__(self, key: str, image_shape: Tuple, config: Dict[str, Any] = None):
         """
         Initializes the simulation engine.
 
         Args:
-            key (str): The secret key (8-24 characters).
+            key (str): The secret key.
             image_shape (Tuple[int, int]): The (height, width) of the original image.
             config (Dict, str, Any], optional): Dictionary to override default parameters.
         """
-        if not (8 <= len(key) <= 24):
-            raise ValueError("Key must be between 8 and 24 characters long.")
+        if not (8 <= len(key)):
+            raise ValueError("Key must be longer than 8 characters.")
 
         self.key = key
         self.original_shape = image_shape
@@ -109,7 +109,7 @@ class VortexCryptEngine:
         
         # --- 1. Configuration ---
         self.config = {
-            'dt': 0.2,
+            'dt': 10,
             'pad_width': 1
         }
         if config:
@@ -204,18 +204,40 @@ class VortexCryptEngine:
     # ======================================================================
 
     def _derive_parameters(self):
-        """Derives Gray-Scott model parameters from the key (Paper's Algorithm 1)."""
+        """
+        Derives Gray-Scott model parameters.
+        Prioritizes values from the config dictionary, otherwise derives from the key.
+        """
         hash_digest = hashlib.sha256(self.key.encode()).digest()
         seed = int.from_bytes(hash_digest[:4], 'big')
         self.prng = np.random.default_rng(seed)
 
         map_range = lambda x, r: r[0] + x * (r[1] - r[0])
 
-        self.params['f_rate'] = map_range(self.prng.random(), self.F_RATE_RANGE)
-        self.params['k_rate'] = map_range(self.prng.random(), self.K_RATE_RANGE)
-        self.params['ru_rate'] = map_range(self.prng.random(), self.RU_RATE_RANGE)
+        # for each parameter, we check if it's in the config file.
+        # else we extract it from the key.
+        
+        if 'f_rate' in self.config:
+            self.params['f_rate'] = self.config['f_rate']
+        else:
+            self.params['f_rate'] = map_range(self.prng.random(), self.F_RATE_RANGE)
+
+        if 'k_rate' in self.config:
+            self.params['k_rate'] = self.config['k_rate']
+        else:
+            self.params['k_rate'] = map_range(self.prng.random(), self.K_RATE_RANGE)
+
+        if 'ru_rate' in self.config:
+            self.params['ru_rate'] = self.config['ru_rate']
+        else:
+            self.params['ru_rate'] = map_range(self.prng.random(), self.RU_RATE_RANGE)
+            
         self.params['rv_rate'] = self.params['ru_rate'] / 2.0
-        self.params['T'] = map_range(self.prng.random(), self.TIME_RANGE)
+
+        if 'T' in self.config:
+            self.params['T'] = self.config['T']
+        else:
+            self.params['T'] = map_range(self.prng.random(), self.TIME_RANGE)
         
         self.params['n_steps'] = int(self.params['T'] / self.config['dt'])
 

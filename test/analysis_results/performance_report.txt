@@ -1,0 +1,19 @@
+--- Rapport d'Analyse de Performance de VortexCrypt ---
+
+TEST 1: Performance moyenne et écart-type sur plusieurs clés
+     test_type                    image  pixels  is_color  encrypt_time_mean  encrypt_time_std  decrypt_time_mean  decrypt_time_std
+Clés Variables      bart_test_image.png   33672      True          50.342947          4.304047          37.723670          3.363207
+Clés Variables      moon_test_image.png   65536     False          68.854067         33.579759          70.998991         31.878800
+Clés Variables     house_test_image.png   65536      True         104.037850          9.079108          77.707591          5.667977
+Clés Variables     lenna_test_image.png  262144      True         613.947619         53.465457         460.425749         40.464152
+Clés Variables cameraman_test_image.png  262144     False         176.486651         29.950802         156.927894         14.328504
+Clés Variables      text_test_image.png  936209     False         772.896212         63.446972         782.936354         77.859174
+
+TEST 2: Performance pour une durée de simulation fixe (T=300.0)
+  test_type                    image  pixels  is_color  encrypt_time_mean  encrypt_time_std  decrypt_time_mean  decrypt_time_std
+Config Fixe      bart_test_image.png   33672      True          59.845809               0.0          45.122582               0.0
+Config Fixe      moon_test_image.png   65536     False          32.559163               0.0          33.361784               0.0
+Config Fixe     house_test_image.png   65536      True         130.116544               0.0          92.880507               0.0
+Config Fixe     lenna_test_image.png  262144      True         742.391416               0.0         558.909212               0.0
+Config Fixe cameraman_test_image.png  262144     False         189.473929               0.0         189.146809               0.0
+Config Fixe      text_test_image.png  936209     False         916.338230               0.0         920.000169               0.0
